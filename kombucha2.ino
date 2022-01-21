@@ -2,6 +2,7 @@
 
 #include <dht11.h>
 #include <LiquidCrystal.h>
+#include <WiFiNINA.h>
 
 dht11 DHT11;
 #define DHT11PIN 7
@@ -47,11 +48,15 @@ int lastExtremeTemp;
 
 // initialize the library by associating any needed LCD interface pin
 // with the arduino pin number it is connected to
-const int rs = 12, en = 11, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
+const int rs = 10, en = 9, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 
 void setup() {
   Serial.begin(9600);
+    while (!Serial) {
+    ; // wait for serial port to connect. Needed for native USB port only
+  }
+  Serial.println("starting setup");
   pinMode(RELAYPIN, OUTPUT);     //Set relay pin as output 
   // set up the LCD's number of columns and rows:
   lcd.begin(16, 2);
@@ -60,22 +65,17 @@ void setup() {
   tempSettingsString = "Hi:" + String(highTemp) + char(223) + " Lo:" + String(lowTemp) + char(223);
   cycleUpTime = (cycleDuration * cyclePercentUp) / 100;
   cycleDownTime = cycleDuration - cycleUpTime;
-  
+  Serial.println("doing setup");
   getTemp();
 }
 
 
 
 void loop() {
-//   
-//  int chk = DHT11.read(DHT11PIN);
-//  float tempC = DHT11.temperature;
-//  tempF = float((tempC *1.8) +32);
-//  
-//  //let's change to one decimal place
-//  long tempVal = (long)(tempF * 10L);
+  
+  Serial.println("starting loop again");
   tempF = getTemp();
-
+ 
   //get current relay state
   relayState = digitalRead(RELAYPIN);
 
@@ -271,6 +271,7 @@ void changeStatus(int lastStatus){
 
 
 int getTemp(){
+  Serial.println("reading temp");
   printRow(1,"reading temp");
   delay(2000);
   
