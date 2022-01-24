@@ -4,27 +4,32 @@
 #include <LiquidCrystal.h>
 #include <WiFiNINA.h>
 
+#include <SimpleTimer.h>
+
+
+#include <arduino_secrets.h>
+#include<BlynkSimpleWiFiNINA.h>
+
+SimpleTimer timer;
+
+// You should get Auth Token in the Blynk App.
+char auth[] = BLYNK_AUTH_TOKEN;
+
+// Your WiFi credentials.
+char ssid[] = WIFI_SSID;
+char pass[] = WIFI_PASS;
+
+
 dht11 DHT11;
 #define DHT11PIN 7
 #define RELAYPIN 8
 
-/*
- * DHT11 has a 1 degree celsius precision
- * so, about 1.8 degrees F precision
- * 
- * 71.6
- * 73.3
- * 75.2
- * 77.0
- * 78.8
- * 80.6
- * 
- * 
- */
 
-int tempF;
-int highTemp= 78; 
-int lowTemp= 75; 
+float tempF;
+
+
+int highSetTemp= 78; 
+int lowSetTemp= 75; 
 
 long loopTime = 15000;
 
@@ -48,59 +53,79 @@ int lastExtremeTemp;
 
 // initialize the library by associating any needed LCD interface pin
 // with the arduino pin number it is connected to
-const int rs = 10, en = 9, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
+const int rs = 12, en = 11, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 
 void setup() {
   Serial.begin(9600);
-    while (!Serial) {
-    ; // wait for serial port to connect. Needed for native USB port only
-  }
+
   Serial.println("starting setup");
+  Blynk.begin(auth, ssid, pass);
+
   pinMode(RELAYPIN, OUTPUT);     //Set relay pin as output 
   // set up the LCD's number of columns and rows:
   lcd.begin(16, 2);
 
   //some setup of variables
-  tempSettingsString = "Hi:" + String(highTemp) + char(223) + " Lo:" + String(lowTemp) + char(223);
+  tempSettingsString = "Hi:" + String(highSetTemp) + char(223) + " Lo:" + String(lowSetTemp) + char(223);
   cycleUpTime = (cycleDuration * cyclePercentUp) / 100;
   cycleDownTime = cycleDuration - cycleUpTime;
   Serial.println("doing setup");
-  getTemp();
+
+  //tempF =getTemp(); 
 }
 
 
 
 void loop() {
-  
+  if(Blynk.connected()){
+    Blynk.run();
+  }else{
+
+      Blynk.connect();  // Try to reconnect to the server
+
+  }
   Serial.println("starting loop again");
   tempF = getTemp();
+  Serial.print("raw tempF:");
+  Serial.println(tempF);
+  Blynk.virtualWrite(V5, tempF);
  
-  //get current relay state
+ //uptime seconds
+ int uptimeSeconds = (millis() - startMillis)/1000;
+ Serial.print("uptimeSeconds: ");
+ Serial.println(uptimeSeconds);
+ Blynk.virtualWrite(V2,uptimeSeconds);
+ 
+
+ 
+   //get current relay state
   relayState = digitalRead(RELAYPIN);
 
   //check current state against current temp
-  if(tempF < lowTemp){
+  if(tempF < lowSetTemp){
     if(currentStatus != 1){
-      //under lowTemp but not full on
+      //under lowSetTemp but not full on
       changeStatus(currentStatus);
       currentStatus = 1;
       incrementIntermittentSettings(1);//bring pecentage up of how much is runs up when intermittnet
       lastExtremeTemp = tempF;
     }
     digitalWrite(RELAYPIN, HIGH); //turn on relay
+    Blynk.virtualWrite(V6,1); //set light as on
     if(tempF < lastExtremeTemp){
       lastExtremeTemp = tempF;
     }
-  }else if(tempF > highTemp){
+  }else if(tempF > highSetTemp){
     if(currentStatus != 0){
-      //over highTemp but not full off
+      //over highSetTemp but not full off
       changeStatus(currentStatus);
       currentStatus = 0;
       incrementIntermittentSettings(-1);//bring pecentage down of how much is runs up when intermittnet
       lastExtremeTemp = tempF;
     }
     digitalWrite(RELAYPIN, LOW); //turn off relay
+    Blynk.virtualWrite(V6,0); //set light as off
     if(tempF > lastExtremeTemp){
       lastExtremeTemp = tempF;
     }
@@ -112,19 +137,7 @@ void loop() {
       changeStatus(currentStatus);
       currentStatus = -1;
       cycleLastChange = millis(); //reset our counter
-//      if(relayState == 1){
-//        //if it was on, keep it on to push a littler further into middle
-//        printRow(1,"#init int ON");
-//        delay(2000);
-//        //digitalWrite(RELAYPIN, HIGH); 
-//        
-//      }else{
-//        //if it was off, keep it off to push further into our perfect zone (not a calzone, our temp zone)
-//        printRow(1,"#init int OFF");
-//        delay(2000);
-//        //digitalWrite(RELAYPIN, LOW); 
-//        
-//      }
+
     }else{
       //we were already in mid-cycle, let's check status duration
       if(relayState == 1){
@@ -132,7 +145,7 @@ void loop() {
           printRow(1,"#setting int OFF");
           delay(2000);
           digitalWrite(RELAYPIN, LOW); //turn off relay
-  
+          Blynk.virtualWrite(V6,0); //set light as off
           cycleLastChange = millis();
         }else{
           digitalWrite(RELAYPIN, HIGH); 
@@ -144,10 +157,11 @@ void loop() {
           printRow(1,"#setting int ON");
           delay(2000);
           digitalWrite(RELAYPIN, HIGH); //turn on relay
-  
+          Blynk.virtualWrite(V6,1); //set light as on
           cycleLastChange = millis();
         }else{
           digitalWrite(RELAYPIN, LOW); 
+          Blynk.virtualWrite(V6,0); //set light as off
         }
         
       }
@@ -163,14 +177,15 @@ void loop() {
   lcd.print("                 ");
   lcd.setCursor(0,0);
     
-  lcd.print(String(tempF));
+  lcd.print(String(tempF,1));
   lcd.print(char(223));
   lcd.print(" ");
 
   int humidity = int((float)DHT11.humidity + 0.5);
   lcd.print(humidity, DEC);
   lcd.print("%");
-
+  Blynk.virtualWrite(V7,humidity);
+  
 
 
   long sinceLastChange = millis() - lastChangeMillis;
@@ -270,7 +285,7 @@ void changeStatus(int lastStatus){
 }
 
 
-int getTemp(){
+float getTemp(){
   Serial.println("reading temp");
   printRow(1,"reading temp");
   delay(2000);
@@ -278,35 +293,29 @@ int getTemp(){
   
   int chk = DHT11.read(DHT11PIN);
   float tempC = DHT11.temperature;
-  float tempTemp = float((tempC *1.8) +32);
-  int temp1 = int(tempTemp + 0.5);
+  float temp1 = roundFloat(float((tempC *1.8) +32));
+  
 
-  printRow(1, ".  " + String(temp1));
+  printRow(1, String(temp1,1));
   delay(5000);
 
   
   chk = DHT11.read(DHT11PIN);
   tempC = DHT11.temperature;
-  tempTemp = float((tempC *1.8) +32);
-  int temp2 = int(tempTemp + 0.5);
-  printRow(1, ".. " + String(temp1) + " " + String(temp2));
+  float temp2 = roundFloat(float((tempC *1.8) +32));
+  
+  printRow(1, String(temp1,1) + " " + String(temp2,1));
   delay(5000);
 
   chk = DHT11.read(DHT11PIN);
   tempC = DHT11.temperature;
-  tempTemp = float((tempC *1.8) +32);
-  int temp3 = int(tempTemp + 0.5);
-  printRow(1, "..." + String(temp1) + " " + String(temp2) + " " + String(temp3));
+  float temp3 = roundFloat(float((tempC *1.8) +32));
+  printRow(1,String(temp1,1) + " " + String(temp2,1) + " " + String(temp3,1));
   delay(2000);
 
+  //get average
+  return roundFloat((temp1 + temp2 + temp3)/3);
 
-
-  
-  if(temp1 == temp2 && temp2 == temp3){
-    return temp1;
-  }else{
-    return getTemp();
-  }
   
 }
 
@@ -317,6 +326,14 @@ void incrementIntermittentSettings(int increaseUp){
   cycleDownTime = cycleDuration - cycleUpTime;
 }
 
+
+float roundFloat(float x){
+  x = x + 0.05;
+  x = x * 10;
+  int y = (int)x;
+  float z = (float)y/10;
+  return z;
+}
 
 void printRow(int rowNum, String toPrint){
   lcd.setCursor(0,rowNum);
