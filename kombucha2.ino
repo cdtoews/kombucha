@@ -72,9 +72,8 @@ long startMillis = millis();
 long lastChangeMillis = millis();
 int relayState; //read from actual pin:RELAYPIN, 0=off 1=on
 int currentStatus = -2; //what the status is 0=off, 1=on, -1=low temp cycle (intermittent on and off)
+char currentState[4];
 
-
-String statusString;
 
 // initialize the library by associating any needed LCD interface pin
 // with the arduino pin number it is connected to
@@ -92,18 +91,22 @@ void setup() {
   pinMode(RELAYPIN, OUTPUT);     //Set relay pin as output
   // set up the LCD's number of columns and rows:
   lcd.begin(16, 2);
-
+  printRow(0,"Calibrating");
+  printRow(1,"Flux Capacitor");
   //some setup of variables
   cycleUpTime = (lowTempCycleDuration * lowTempCyclePercentUp) / 100;
   cycleDownTime = lowTempCycleDuration - cycleUpTime;
   Serial.println("doing setup");
   //give dht11 a few seconds to get its bearings and poll it, get a full reading, and send
+
   timer.in(5000, readTemp);
-  timer.in(6000, readTemp);
   timer.in(7000, readTemp);
-  timer.in(8000, readTemp);
-  timer.in(9000, updateBlynk);
-  timer.in(10000, updateAdafruit);
+  timer.in(9000, readTemp);
+  timer.in(11000, readTemp);
+  timer.in(13000, updateBlynk);
+  timer.in(17000, updateAdafruit);
+  
+  
   
   timer.every(readTempRepeat, readTemp);
   delay(5000);
@@ -120,10 +123,11 @@ void loop() {
   timer.tick();
 }
 
+
 bool updateAdafruit(void *){
+  printRow(1, "Updating Adafruit");
   MQTT_connect();
-  uint32_t unsignedTemp = tempF;
-  uint32_t unsignedHumidity = humidity;
+
   uint32_t unsignedRelayState = digitalRead(RELAYPIN);
   
   // Now we can publish stuff!
@@ -160,6 +164,7 @@ bool updateAdafruit(void *){
 }
 
 bool updateBlynk(void *) {
+  printRow(1, "Updating Blynk");
   if (Blynk.connected()) {
     Blynk.run();
   } else {
@@ -239,6 +244,7 @@ void checkThresholds() {
 }
 
 void updateLCDstatus() {
+  printRow(1,"Updating LCD");
   lcd.setCursor(0, 0);
   lcd.print("                 ");
   lcd.setCursor(0, 0);
@@ -249,23 +255,23 @@ void updateLCDstatus() {
 
   lcd.print(String(humidity,1));
   lcd.print("%");
-  String currentState;
+  
   if (currentStatus == 1) {
-    currentState = "U";
+    strcpy(currentState," U");
   } else if (currentStatus == 0) {
-    currentState = "D";
+    strcpy(currentState," D");
   } else if (currentStatus == -1) {
     relayState = digitalRead(RELAYPIN);
     if (relayState == 1) {
-      currentState = "~U";
+        strcpy(currentState," ~U");
     } else {
-      currentState = "~D";
+        strcpy(currentState," ~D");
     }
 
   } else {
-    currentState = "?";
+    strcpy(currentState," ?");
   }
-  lcd.print(" " + currentState );
+  lcd.print(currentState );
 
 }
 
@@ -276,7 +282,20 @@ bool readTemp(void *) {
   float tempC = DHT11.temperature;
   float temp1 = roundFloat(float((tempC * 1.8) + 32));
   temps[tempsArrayIndicator] = temp1;
-  printRow(1, "temp:" + String(temp1, 1));
+
+  //put temp on lcd without strings
+  lcd.setCursor(0, 1);
+  lcd.print("                   ");
+  lcd.setCursor(0, 1);
+  char indicator[] = "_";
+  lcd.print("temp:");
+  lcd.print(indicator);
+  for(int i=0;i<tempsArrayIndicator;i++){
+    lcd.print(indicator);
+  }
+  lcd.print(String(temp1, 1));
+
+  
   Serial.println("temp: " + String(temp1, 1));
   humidities[tempsArrayIndicator++] = DHT11.humidity;
 
@@ -318,7 +337,7 @@ float roundFloat(float x) {
   return z;
 }
 
-void printRow(int rowNum, String toPrint) {
+void printRow(int rowNum, char toPrint[]) {
   lcd.setCursor(0, rowNum);
   lcd.print("                   ");
   lcd.setCursor(0, rowNum);
