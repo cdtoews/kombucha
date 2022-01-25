@@ -5,10 +5,13 @@
 #include <arduino-timer.h>
 auto timer = timer_create_default(); // create a timer with default settings
 long BlynkTimerRepeat = 60000;
+long AdafruitTimerRepeat = 60000;
 long readTempRepeat = 15000;
 
 #include <arduino_secrets.h>
 #include<BlynkSimpleWiFiNINA.h>
+#include "Adafruit_MQTT.h"
+#include "Adafruit_MQTT_Client.h"
 
 
 // You should get Auth Token in the Blynk App.
@@ -18,6 +21,28 @@ char auth[] = BLYNK_AUTH_TOKEN;
 char ssid[] = WIFI_SSID;
 char pass[] = WIFI_PASS;
 
+/************************* Adafruit.io Setup *********************************/
+#define AIO_SERVER      "io.adafruit.com"
+#define AIO_SERVERPORT  1883                   // use 8883 for SSL
+#define AIO_USERNAME    IO_USERNAME
+#define AIO_KEY         IO_KEY
+
+WiFiClient client;
+
+// Setup the MQTT client class by passing in the WiFi client and MQTT server and login details.
+Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO_KEY);
+
+/****************************** Feeds ***************************************/
+
+// Setup a feed called 'photocell' for publishing.
+// Notice MQTT paths for AIO follow the form: <username>/feeds/<feedname>
+Adafruit_MQTT_Publish tempPub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/temperature");
+Adafruit_MQTT_Publish humidityPub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/humiditiy");
+Adafruit_MQTT_Publish lightPub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/light");
+
+// Setup a feed subscribing to changes.
+Adafruit_MQTT_Subscribe sethightemp = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/hightemp");
+Adafruit_MQTT_Subscribe setlowtemp = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/setlowtemp");
 
 dht11 DHT11;
 #define DHT11PIN 7
@@ -36,7 +61,7 @@ int lowSetTemp = 77;
 
 
 long lowTempCycleDuration = 1800000; //amount of time to cyle on&off when between high and low temps//600000 10 minutes, 3600000 1 hour
-int lowTempCyclePercentUp = 45; //it's gone over a day at 45% so far. that's a good starting point
+int lowTempCyclePercentUp = 45; //good starting point. 
 long cycleUpTime; //this will be calculated
 long cycleDownTime;//this will be calculated
 
@@ -72,15 +97,19 @@ void setup() {
   cycleUpTime = (lowTempCycleDuration * lowTempCyclePercentUp) / 100;
   cycleDownTime = lowTempCycleDuration - cycleUpTime;
   Serial.println("doing setup");
-  //give dht11 a few seconds to get its bearings and poll it
-  timer.at(millis() + 5000, readTemp);
-  timer.at(millis() + 6000, readTemp);
-  timer.at(millis() + 7000, readTemp);
-  timer.at(millis() + 8000, readTemp);
-  timer.at(millis() + 9000, updateBlynk);
+  //give dht11 a few seconds to get its bearings and poll it, get a full reading, and send
+  timer.in(5000, readTemp);
+  timer.in(6000, readTemp);
+  timer.in(7000, readTemp);
+  timer.in(8000, readTemp);
+  timer.in(9000, updateBlynk);
+  timer.in(10000, updateAdafruit);
+  
   timer.every(readTempRepeat, readTemp);
-  delay(1000);
+  delay(5000);
   timer.every(BlynkTimerRepeat, updateBlynk);
+  delay(5000);
+  timer.every(AdafruitTimerRepeat, updateAdafruit);
 
 
 }
@@ -88,15 +117,47 @@ void setup() {
 
 
 void loop() {
-
   timer.tick();
-
-
-
-
-
 }
 
+bool updateAdafruit(void *){
+  MQTT_connect();
+  uint32_t unsignedTemp = tempF;
+  uint32_t unsignedHumidity = humidity;
+  uint32_t unsignedRelayState = digitalRead(RELAYPIN);
+  
+  // Now we can publish stuff!
+  Serial.print(F("\nSending temp to adafruit val "));
+  Serial.print(tempF);
+  Serial.print("...");
+  if (! tempPub.publish(tempF)) {
+    Serial.println(F("Failed"));
+  } else {
+    Serial.println(F("OK!"));
+  }
+
+  // Now we can publish stuff!
+  Serial.print(F("\nSending humidity val "));
+  Serial.print(humidity);
+  Serial.print("...");
+  if (! humidityPub.publish(humidity)) {
+    Serial.println(F("Failed"));
+  } else {
+    Serial.println(F("OK!"));
+  }
+
+
+    // Now we can publish stuff!
+  Serial.print(F("\nSending relay state val "));
+  Serial.print("relay");
+  Serial.print("...");
+  if (! lightPub.publish(unsignedRelayState)) {
+    Serial.println(F("Failed"));
+  } else {
+    Serial.println(F("OK!"));
+  }
+  
+}
 
 bool updateBlynk(void *) {
   if (Blynk.connected()) {
@@ -175,8 +236,6 @@ void checkThresholds() {
       }
     }
   }//end of if/else for temps
-
-
 }
 
 void updateLCDstatus() {
@@ -240,10 +299,7 @@ bool readTemp(void *) {
     updateLCDstatus();
     tempsArrayIndicator = 0;
   }
-
-
   return true;
-
 }
 
 void incrementIntermittentSettings(int increaseUp) {
@@ -267,4 +323,31 @@ void printRow(int rowNum, String toPrint) {
   lcd.print("                   ");
   lcd.setCursor(0, rowNum);
   lcd.print(toPrint);
+}
+
+// Function to connect and reconnect as necessary to the MQTT server.
+// Should be called in the loop function and it will take care if connecting.
+void MQTT_connect() {
+  int8_t ret;
+
+  // Stop if already connected.
+  if (mqtt.connected()) {
+    return;
+  }
+
+  Serial.print("Connecting to MQTT... ");
+
+  uint8_t retries = 3;
+  while ((ret = mqtt.connect()) != 0) { // connect will return 0 for connected
+       Serial.println(mqtt.connectErrorString(ret));
+       Serial.println("Retrying MQTT connection in 5 seconds...");
+       mqtt.disconnect();
+       delay(5000);  // wait 5 seconds
+       retries--;
+       if (retries == 0) {
+         // basically die and wait for WDT to reset me
+         while (1);
+       }
+  }
+  Serial.println("MQTT Connected!");
 }
