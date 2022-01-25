@@ -119,67 +119,6 @@ bool updateBlynk(void *) {
   return true; //repeat? true
 }
 
-//void loopStatus(){
-//  long titleDelay = 2000;
-//  long statusDelay = 5000;
-//
-//  printRow(1,"Cycle Times:");
-//  delay(titleDelay);
-//  printRow(1,statusString);
-//  delay(statusDelay);
-//
-//  printRow(1,"Temp Extremes");
-//  delay(titleDelay);
-//  printRow(1,tempHistString);
-//  delay(statusDelay);
-//
-//
-//
-//  if(currentStatus == -1){
-//    //we are currently cycling
-//    printRow(1,"Between hi/lo");
-//    delay(titleDelay);
-//    relayState = digitalRead(RELAYPIN);
-//    if(relayState ==1){
-//      printRow(1,"~ on, %up:" + String(lowTempCyclePercentUp));
-//    }else{
-//      printRow(1,"~ off, %up:"  + String(lowTempCyclePercentUp));
-//    }
-//    delay(titleDelay);
-//  }else{
-//    printRow(1,"---- %up:"   + String(lowTempCyclePercentUp));
-//  }
-//
-//}
-
-
-//void changeStatus(int lastStatus){
-//  //see how long at last status
-//  long sinceLastChange = millis() - lastChangeMillis;
-//  int minSinceChange = (int) (sinceLastChange / 1000 / 60);
-//  lastChangeMillis = millis();
-//  String currentStateString;
-//  if(lastStatus == 1){
-//    currentStateString = "U";
-//
-//  }else if( lastStatus == 0){
-//    currentStateString = "D";
-//
-//  }else if(lastStatus == -1){
-//    currentStateString = "~";
-//  }else if(lastStatus == -2){
-//    currentStateString = "startup";
-//  }else{
-//    currentStateString = "?";
-//  }
-//  tempHistString = String(lastExtremeTemp) + "|" + tempHistString;
-//  tempHistString = tempHistString.substring(0,16);
-//  String thisUpdate = currentStateString +  minSinceChange + "|";
-//  statusString = thisUpdate + statusString;
-//  statusString = statusString.substring(0,16);
-//
-//}
-
 void checkThresholds() {
 
   //get current relay state
