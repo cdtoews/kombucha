@@ -1,6 +1,8 @@
 
 
 #include <dht11.h>
+#include <Adafruit_AHTX0.h>
+const int sensorIndicator = 2; // 1 = DHT11, 2=AHT20
 #include <LiquidCrystal.h>
 #include <arduino-timer.h>
 auto timer = timer_create_default(); // create a timer with default settings
@@ -13,9 +15,11 @@ long readTempRepeat = 15000;
 #include "Adafruit_MQTT.h"
 #include "Adafruit_MQTT_Client.h"
 
+Adafruit_AHTX0 aht;
 
 // You should get Auth Token in the Blynk App.
 char auth[] = BLYNK_AUTH_TOKEN;
+bool updateToBlynk = true;
 
 // Your WiFi credentials.
 char ssid[] = WIFI_SSID;
@@ -39,22 +43,28 @@ Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO
 Adafruit_MQTT_Publish tempPub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/temperature");
 Adafruit_MQTT_Publish humidityPub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/humiditiy");
 Adafruit_MQTT_Publish lightPub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/light");
+Adafruit_MQTT_Publish anomalousTempPub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/anomalousTemp");
+bool updateToAdafruit = true;
 
 // Setup a feed subscribing to changes.
-Adafruit_MQTT_Subscribe sethightemp = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/hightemp");
-Adafruit_MQTT_Subscribe setlowtemp = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/setlowtemp");
+Adafruit_MQTT_Subscribe sethightemp = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/kombuha.hightemp");
+Adafruit_MQTT_Subscribe setlowtemp = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/kombuha.lowtemp");
+bool updateFromAdafruit = true;
 
 dht11 DHT11;
 #define DHT11PIN 7
 #define RELAYPIN 8
+#define RESETPIN 10
 
 
-float tempF;
+float tempF = -1.0;
 const int tempsToRound = 4;
 float temps[tempsToRound];
 float humidities[tempsToRound];
+int tempAnomalyCount = 0;
 float humidity;
 int tempsArrayIndicator = 0; //keep track of which element in array we are updating, this will be for rounding temps
+//these are initial and default settings and will be overwritten from adafruit (if adafruit is enabled
 int highSetTemp = 79;
 int lowSetTemp = 77;
 
@@ -80,13 +90,27 @@ char currentState[4];
 const int rs = 12, en = 11, d4 = 5, d5 = 4, d6 = 3, d7 = 2;
 LiquidCrystal lcd(rs, en, d4, d5, d6, d7);
 
-
+void MQTT_connect();
 
 void setup() {
+  //get ready for manual reset
+  digitalWrite(RESETPIN, HIGH);
+  pinMode(RESETPIN, OUTPUT);  
+     
   Serial.begin(9600);
-
-  Serial.println("starting setup");
   Blynk.begin(auth, ssid, pass);
+
+  //subscribe to settings
+  mqtt.subscribe(&sethightemp);
+  mqtt.subscribe(&setlowtemp);
+
+   if (! aht.begin()) {
+    Serial.println("Could not find AHT? Check wiring");
+    printRow(1,"AHT20 not found");
+    delay(10000);
+    printRow(1,"Do Something");
+    delay(10000);
+  }
 
   pinMode(RELAYPIN, OUTPUT);     //Set relay pin as output
   // set up the LCD's number of columns and rows:
@@ -96,7 +120,9 @@ void setup() {
   //some setup of variables
   cycleUpTime = (lowTempCycleDuration * lowTempCyclePercentUp) / 100;
   cycleDownTime = lowTempCycleDuration - cycleUpTime;
+  Serial.println("##############");
   Serial.println("doing setup");
+  Serial.println("##############");
   //give dht11 a few seconds to get its bearings and poll it, get a full reading, and send
 
   timer.in(5000, readTemp);
@@ -105,7 +131,8 @@ void setup() {
   timer.in(11000, readTemp);
   timer.in(13000, updateBlynk);
   timer.in(17000, updateAdafruit);
-  
+  timer.in(3600000, rebootFunc);//reboot in an hour. until I get everything happy I need to reset it 
+
   
   
   timer.every(readTempRepeat, readTemp);
@@ -124,46 +151,92 @@ void loop() {
 }
 
 
+bool rebootFunc( void*){
+  printRow(1,"Going to Reboot");
+  delay(2000);
+  //bring reset pin low to trigger reset
+  digitalWrite(RESETPIN, LOW);
+  return false; //this will never run (unless wires are disconnected
+}
+
+
+
+
 bool updateAdafruit(void *){
-  printRow(1, "Updating Adafruit");
-  MQTT_connect();
+  if(!updateToAdafruit & !updateFromAdafruit){
+    Serial.println("not updating Adafruit");
+    return false;
+  }
+    
+  Serial.println("updating Adafruit");
+    
+    printRow(1, "Updating Adafruit");
+    MQTT_connect();
+    if(updateToAdafruit){
+      Serial.println("going to update TO adafruit");
+      uint32_t unsignedRelayState = digitalRead(RELAYPIN);
+      
+      // Now we can publish stuff!
+      Serial.print("Sending temp to adafruit val ");
+      Serial.print(tempF);
+      Serial.print("...");
+      if (! tempPub.publish(tempF)) {
+        Serial.println(F("Failed"));
+      } else {
+        Serial.println(F("OK!"));
+      }
+    
+      // Now we can publish stuff!
+      Serial.print("Sending humidity val ");
+      Serial.print(humidity);
+      Serial.print("...");
+      if (! humidityPub.publish(humidity)) {
+        Serial.println(F("Failed"));
+      } else {
+        Serial.println(F("OK!"));
+      }
 
-  uint32_t unsignedRelayState = digitalRead(RELAYPIN);
+            // Now we can publish stuff!
+      Serial.print("Sending relay state val ");
+      Serial.print("relay");
+      Serial.print("...");
+      if (! lightPub.publish(unsignedRelayState)) {
+        Serial.println(F("Failed"));
+      } else {
+        Serial.println(F("OK!"));
+      }
+
+
   
-  // Now we can publish stuff!
-  Serial.print(F("\nSending temp to adafruit val "));
-  Serial.print(tempF);
-  Serial.print("...");
-  if (! tempPub.publish(tempF)) {
-    Serial.println(F("Failed"));
-  } else {
-    Serial.println(F("OK!"));
+    }
+    
+  if(updateFromAdafruit){
+      Serial.println("going to update FROM adafruit");
+    //let's read settings from adafruit
+  //sethightemp
+  //setlowtemp
+  // this is our 'wait for incoming subscription packets' busy subloop
+    Adafruit_MQTT_Subscribe *subscription;
+    while ((subscription = mqtt.readSubscription(1000))) {
+      Serial.println("#### inside subscription");
+      if (subscription == &setlowtemp) {
+        Serial.print(F("Got: "));
+        Serial.println((char *)setlowtemp.lastread);
+      }else{
+        Serial.println("didn't get subscription");
+      }
+    }
   }
 
-  // Now we can publish stuff!
-  Serial.print(F("\nSending humidity val "));
-  Serial.print(humidity);
-  Serial.print("...");
-  if (! humidityPub.publish(humidity)) {
-    Serial.println(F("Failed"));
-  } else {
-    Serial.println(F("OK!"));
-  }
 
-
-    // Now we can publish stuff!
-  Serial.print(F("\nSending relay state val "));
-  Serial.print("relay");
-  Serial.print("...");
-  if (! lightPub.publish(unsignedRelayState)) {
-    Serial.println(F("Failed"));
-  } else {
-    Serial.println(F("OK!"));
-  }
-  
+    
 }
 
 bool updateBlynk(void *) {
+  if(!updateToBlynk){
+    Serial.println("not updating blynk");
+    return false;
+  }
   printRow(1, "Updating Blynk");
   if (Blynk.connected()) {
     Blynk.run();
@@ -249,7 +322,7 @@ void updateLCDstatus() {
   lcd.print("                 ");
   lcd.setCursor(0, 0);
 
-  lcd.print(String(tempF, 1));
+  lcd.print(String(tempF, 2));
   lcd.print(char(223));
   lcd.print(" ");
 
@@ -278,11 +351,83 @@ void updateLCDstatus() {
 bool readTemp(void *) {
   Serial.println("reading temp");
 
-  int chk = DHT11.read(DHT11PIN);
-  float tempC = DHT11.temperature;
-  float temp1 = roundFloat(float((tempC * 1.8) + 32));
-  temps[tempsArrayIndicator] = temp1;
 
+  float tempC;
+  float currentTempF;
+  if(sensorIndicator == 1){
+      int chk = DHT11.read(DHT11PIN);
+      tempC = DHT11.temperature;
+      currentTempF = roundFloat(float((tempC * 1.8) + 32));
+    temps[tempsArrayIndicator] = currentTempF;
+      humidities[tempsArrayIndicator++] = DHT11.humidity;
+  }else if(sensorIndicator == 2){
+    //we have AHT20
+    sensors_event_t humidity, temp;
+    aht.getEvent(&humidity, &temp);// populate temp and humidity objects with fresh data
+    tempC = temp.temperature;
+    currentTempF = roundFloat(float((tempC * 1.8) + 32));
+
+    //check if read temp is anomalous temperature reading
+    //anomalous being defined as the temp being (25 * (tempAnomalyCount + 1))% off of the previous reading
+    float tempDiffPercent = (abs(currentTempF - tempF)) / tempF;
+    //if it's not the first rading, and it's anomalous
+    if(tempF != -1.0 && tempDiffPercent > ((tempAnomalyCount + 1) * 25)){
+      printRow(1,"Anomalous Temp");
+      Serial.println("########################");
+      Serial.println("we got an anomalous reading");
+      Serial.print("last temp reading : ");
+      Serial.print(tempF);
+      Serial.print("   currentTempReading in F :");
+      Serial.print(currentTempF);
+      Serial.print("   current reading in C :");
+      Serial.print(tempC);
+      Serial.print("   anomaly count: ");
+      Serial.println(tempAnomalyCount);
+      Serial.println("########################");
+      tempAnomalyCount += 1;
+
+      //publish anomalous temp
+      //anomalousTempPub
+      if (! anomalousTempPub.publish(currentTempF)) {
+        Serial.println(F("Failed"));
+      } else {
+        Serial.println(F("OK!"));
+      }
+      
+      return true;
+    }else{
+      tempAnomalyCount = 0;
+    }
+    
+
+//    
+//    if(tempC == 0){
+//      //if we got a zero, stop, catch your breath, think about a happy place, and look deep into your soul for the correct temp
+// 
+//      printRow(1,"ZERO READ AHT20");
+//      delay(2000);
+//      sensors_event_t humidity, temp;
+//      aht.getEvent(&humidity, &temp);// populate temp and humidity objects with fresh data
+//      tempC = temp.temperature;
+//    }
+    
+    temps[tempsArrayIndicator] = currentTempF;
+    humidities[tempsArrayIndicator++] = humidity.relative_humidity;
+    Serial.print("AHT20 Temperature: "); 
+    Serial.print(temp.temperature); 
+    Serial.print(" degrees C   "    );
+    Serial.print("Humidity: "); 
+    Serial.print(humidity.relative_humidity); 
+    Serial.println("% rH");
+  }else{
+    printRow(1,"Sensor Error");
+  }
+
+
+  
+  
+  Serial.print("array indicator: ");
+  Serial.println(tempsArrayIndicator,DEC);
   //put temp on lcd without strings
   lcd.setCursor(0, 1);
   lcd.print("                   ");
@@ -293,11 +438,11 @@ bool readTemp(void *) {
   for(int i=0;i<tempsArrayIndicator;i++){
     lcd.print(indicator);
   }
-  lcd.print(String(temp1, 1));
+  lcd.print(String(currentTempF, 2));
 
   
-  Serial.println("temp: " + String(temp1, 1));
-  humidities[tempsArrayIndicator++] = DHT11.humidity;
+  Serial.println("temp: " + String(currentTempF, 2));
+  
 
 
   //let's see if we have tempsToRound temps to average
@@ -310,7 +455,7 @@ bool readTemp(void *) {
     }
     float roundedTemp = roundFloat(tempTotal / tempsToRound);
     tempF = roundedTemp;
-    Serial.println("new Temp: " + String(tempF, 1));
+    Serial.println("new Temp: " + String(tempF, 2));
     float roundedHumidity = roundFloat(humidityTotal / tempsToRound);
     humidity = roundedHumidity;
     Serial.println("new Humdidity: " + String(humidity, 1));
@@ -330,10 +475,10 @@ void incrementIntermittentSettings(int increaseUp) {
 
 
 float roundFloat(float x) {
-  x = x + 0.05;
-  x = x * 10;
+  x = x + 0.005;
+  x = x * 100;
   int y = (int)x;
-  float z = (float)y / 10;
+  float z = (float)y / 100;
   return z;
 }
 
