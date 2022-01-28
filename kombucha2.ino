@@ -80,6 +80,7 @@ Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO
 Adafruit_MQTT_Publish tempPub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/temperature");
 Adafruit_MQTT_Publish humidityPub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/humiditiy");
 Adafruit_MQTT_Publish lightPub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/light");
+Adafruit_MQTT_Publish thermostatStatusPub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/kombuha.thermostatstatus");
 
 // Setup a feed subscribing to changes.
 Adafruit_MQTT_Publish sethightempGet = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/kombuha.hightemp/get");
@@ -118,8 +119,13 @@ long cycleLastChange = millis();
 long startMillis = millis();
 long lastChangeMillis = millis();
 int relayState; //read from actual pin:RELAYPIN, 0=off 1=on
-int currentStatus = -2; //what the status is 0=off, 1=on, -1=low temp cycle (intermittent on and off)
+const int statusInitialing = -2;
+const int statusOff = 0;
+const int statusLow = 1;
+const int statusHigh = 2;
+int currentStatus = statusInitialing; //what the status is 0=off, 1=on, -1=low temp cycle (intermittent on and off)
 char currentState[4];
+
 
 
 // initialize the library by associating any needed LCD interface pin
@@ -302,14 +308,25 @@ bool updateAdafruit(void *) {
   }
 
   // Now we can publish stuff!
-  Serial.print("Sending relay state val ");
-  Serial.print("relay");
-  Serial.print("...");
+  Serial.print("Sending relay state val ... ");
   if (! lightPub.publish(unsignedRelayState)) {
     Serial.println(F("Failed"));
   } else {
     Serial.println(F("OK!"));
   }
+
+//thermostatStatusPub
+  // Now we can publish stuff!
+  Serial.print("Sending current thermostat status val ... ");
+  uint32_t unsignedStatus = currentStatus;
+  if (! thermostatStatusPub.publish(unsignedStatus)) {
+    Serial.println(F("Failed"));
+  } else {
+    Serial.println(F("OK!"));
+  }
+
+
+
 
 }
 
@@ -346,27 +363,27 @@ void checkThresholds() {
 
   //check current state against current temp
   if (tempF < lowSetTemp) {
-    if (currentStatus != 1) {
+    if (currentStatus != statusHigh) {
       //under lowSetTemp but not full on
-      currentStatus = 1;
+      currentStatus = statusHigh;
       incrementIntermittentSettings(1);//bring pecentage up of how much is runs up when intermittnet
     }
     digitalWrite(RELAYPIN, HIGH); //turn on relay
 
   } else if (tempF > highSetTemp) {
-    if (currentStatus != 0) {
+    if (currentStatus != statusOff) {
       //over highSetTemp but not full off
-      currentStatus = 0;
+      currentStatus = statusOff;
       incrementIntermittentSettings(-1);//bring pecentage down of how much is runs up when intermittnet
     }
     digitalWrite(RELAYPIN, LOW); //turn off relay
 
   } else {
     //we are between high and low
-    if (currentStatus != -1) {
+    if (currentStatus != statusLow) {
       //we just jumped into intermittent cycling
       //leave relay as it was
-      currentStatus = -1;
+      currentStatus = statusLow;
       cycleLastChange = millis(); //reset our counter
 
     } else {
@@ -410,11 +427,11 @@ void updateLCDstatus() {
   lcd.print(String(humidity, 1));
   lcd.print("%");
 
-  if (currentStatus == 1) {
+  if (currentStatus == statusHigh) {
     strcpy(currentState, " U");
-  } else if (currentStatus == 0) {
+  } else if (currentStatus == statusOff) {
     strcpy(currentState, " D");
-  } else if (currentStatus == -1) {
+  } else if (currentStatus == statusLow) {
     relayState = digitalRead(RELAYPIN);
     if (relayState == 1) {
       strcpy(currentState, " ~U");
