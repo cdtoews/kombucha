@@ -10,6 +10,7 @@ long BlynkTimerRepeat = 60000; // every minute
 long AdafruitTimerRepeat = 60000; //every minute
 long AdafruitPullTimerRepeat = 60000; //every minute
 long AdafruitTriggerPullTimerRepeat = 3600000;// every hour
+long rebootTimer = 3600000;//how long before we reboot ourselves, 3600000 = 1 hour
 
 long readTempRepeat = 15000;
 bool updateToBlynk = true;
@@ -48,8 +49,6 @@ Adafruit_MQTT_Client mqtt(&client, AIO_SERVER, AIO_SERVERPORT, AIO_USERNAME, AIO
 Adafruit_MQTT_Publish tempPub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/temperature");
 Adafruit_MQTT_Publish humidityPub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/humiditiy");
 Adafruit_MQTT_Publish lightPub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/light");
-Adafruit_MQTT_Publish anomalousTempPub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/anomalousTemp");
-
 
 // Setup a feed subscribing to changes.
 Adafruit_MQTT_Publish sethightempGet = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/kombuha.hightemp/get");
@@ -148,7 +147,7 @@ void setup() {
     timer.in(17000, updateAdafruit);
   }
 
-  timer.in(3600000, rebootFunc);//reboot in an hour. until I get everything happy I need to reset it
+  timer.in(rebootTimer, rebootFunc);//reboot in an hour. until I get everything happy I need to reset it
 
 
 
@@ -421,8 +420,9 @@ bool readTemp(void *) {
     //check if read temp is anomalous temperature reading
     //anomalous being defined as the temp being (25 * (tempAnomalyCount + 1))% off of the previous reading
     float tempDiffPercent = (abs(currentTempF - tempF)) / tempF;
-    //if it's not the first rading, and it's anomalous
-    if (tempF != -1.0 && tempDiffPercent > ((tempAnomalyCount + 1) * 25)) {
+    //if it's not the first rading, and it's anomalous, we will ignore it. 
+    //each subsequent anomalous reading adds 10% to allowed range of non-anomalous readings
+    if (tempF != -1.0 && tempDiffPercent > ((tempAnomalyCount + 1) * .1)) {
       printRow(1, "Anomalous Temp");
       Serial.println("########################");
       Serial.println("we got an anomalous reading");
@@ -437,13 +437,6 @@ bool readTemp(void *) {
       Serial.println("########################");
       tempAnomalyCount += 1;
 
-      //publish anomalous temp
-      //anomalousTempPub
-      if (! anomalousTempPub.publish(currentTempF)) {
-        Serial.println(F("Failed"));
-      } else {
-        Serial.println(F("OK!"));
-      }
 
       return true;
     } else {
