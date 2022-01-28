@@ -1,3 +1,34 @@
+/*
+ * Create by Chris Toews
+ * https://github.com/cdtoews
+ * 
+ * This is for controlling a relay that has a light attached to it,
+ * I use this for my kombucha cabinet. There is a high and low temp setting
+ * If the current temperature is between the high and low settings
+ * the relay will go off and on every 20 minutes or so.
+ * The percentage of on vs off will chage as it either goes outside of the acceptable range
+ * 
+ * You will need a library called arduino_secrets.h
+ * this will need the following
+ * 
+// for adafruit:
+#define IO_USERNAME  "adafruit_user"
+#define IO_KEY       "adafruit_io_key"
+
+
+//for Blynk
+#define BLYNK_TEMPLATE_ID "blynk_template_ID"
+#define BLYNK_DEVICE_NAME "blynk_device_name"
+#define BLYNK_AUTH_TOKEN "blynk_auth_token"
+
+
+// for different libraries
+#define WIFI_SSID "your_ssis"
+#define WIFI_PASS "your_wifi_pass"
+
+ * 
+ * 
+ */
 
 
 #include <dht11.h>
