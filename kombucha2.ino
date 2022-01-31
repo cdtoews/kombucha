@@ -1,34 +1,37 @@
 /*
- * Create by Chris Toews
- * https://github.com/cdtoews
- * 
- * This is for controlling a relay that has a light attached to it,
- * I use this for my kombucha cabinet. There is a high and low temp setting
- * If the current temperature is between the high and low settings
- * the relay will go off and on every 20 minutes or so.
- * The percentage of on vs off will chage as it either goes outside of the acceptable range
- * 
- * You will need a library called arduino_secrets.h
- * this will need the following
- * 
-// for adafruit:
-#define IO_USERNAME  "adafruit_user"
-#define IO_KEY       "adafruit_io_key"
+   Create by Chris Toews
+   https://github.com/cdtoews
+
+   This is for controlling a relay that has a light attached to it,
+   I use this for my kombucha cabinet. There is a high and low temp setting
+   If the current temperature is between the high and low settings
+   the relay will go off and on every 20 minutes or so.
+   The percentage of on vs off will chage as it goes outside of the acceptable range
+
+   I originally used a DHT11, but i now use an AHT20. you can use either by
+   enabling either code by changing value of sensorIndicator
+
+   You will need a library called arduino_secrets.h
+   this will need the following
+
+  // for adafruit:
+  #define IO_USERNAME  "adafruit_user"
+  #define IO_KEY       "adafruit_io_key"
 
 
-//for Blynk
-#define BLYNK_TEMPLATE_ID "blynk_template_ID"
-#define BLYNK_DEVICE_NAME "blynk_device_name"
-#define BLYNK_AUTH_TOKEN "blynk_auth_token"
+  //for Blynk
+  #define BLYNK_TEMPLATE_ID "blynk_template_ID"
+  #define BLYNK_DEVICE_NAME "blynk_device_name"
+  #define BLYNK_AUTH_TOKEN "blynk_auth_token"
 
 
-// for different libraries
-#define WIFI_SSID "your_ssis"
-#define WIFI_PASS "your_wifi_pass"
+  // for different libraries
+  #define WIFI_SSID "your_ssis"
+  #define WIFI_PASS "your_wifi_pass"
 
- * 
- * 
- */
+
+
+*/
 
 
 #include <dht11.h>
@@ -41,7 +44,7 @@ long BlynkTimerRepeat = 60000; // every minute
 long AdafruitTimerRepeat = 60000; //every minute
 long AdafruitPullTimerRepeat = 60000; //every minute
 long AdafruitTriggerPullTimerRepeat = 3600000;// every hour
-long rebootTimer = 3600000;//how long before we reboot ourselves, 3600000 = 1 hour
+long rebootTimer = 7200000;//how long before we reboot ourselves, 3600000 = 1 hour
 
 long readTempRepeat = 15000;
 bool updateToBlynk = true;
@@ -81,12 +84,18 @@ Adafruit_MQTT_Publish tempPub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feed
 Adafruit_MQTT_Publish humidityPub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/humiditiy");
 Adafruit_MQTT_Publish lightPub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/light");
 Adafruit_MQTT_Publish thermostatStatusPub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/kombuha.thermostatstatus");
+Adafruit_MQTT_Publish lowTempPercentagePub = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/kombuha.lowtemppercentage");
 
-// Setup a feed subscribing to changes.
+//publishes for getting latest
 Adafruit_MQTT_Publish sethightempGet = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/kombuha.hightemp/get");
 Adafruit_MQTT_Publish setlowtempGet = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/kombuha.lowtemp/get");
+Adafruit_MQTT_Publish lowTempPercentageGet = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/kombuha.lowtemppercentage/get");
+
+//subscriptions
 Adafruit_MQTT_Subscribe sethightemp = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/kombuha.hightemp");
 Adafruit_MQTT_Subscribe setlowtemp = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/kombuha.lowtemp");
+Adafruit_MQTT_Subscribe lowTempPercentageSub = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/kombuha.lowtemppercentage");
+
 
 
 dht11 DHT11;
@@ -109,7 +118,8 @@ int lowSetTemp = 77; //default setting possibly overwritten from adafruit
 
 
 long lowTempCycleDuration = 1800000; //amount of time to cyle on&off when between high and low temps//600000 10 minutes, 3600000 1 hour
-int lowTempCyclePercentUp = 45; //good starting point.
+int lowTempCyclePercentUp = 50; //good starting point.
+int lowTempPercentageChange = 3;
 long cycleUpTime; //this will be calculated
 long cycleDownTime;//this will be calculated
 
@@ -119,11 +129,11 @@ long cycleLastChange = millis();
 long startMillis = millis();
 long lastChangeMillis = millis();
 int relayState; //read from actual pin:RELAYPIN, 0=off 1=on
-const int statusInitialing = -2;
+const int statusInitializing = -2;
 const int statusOff = 0;
 const int statusLow = 1;
 const int statusHigh = 2;
-int currentStatus = statusInitialing; //what the status is 0=off, 1=on, -1=low temp cycle (intermittent on and off)
+int currentStatus = statusInitializing; //what the status is 0=off, 1=on, -1=low temp cycle (intermittent on and off)
 char currentState[4];
 
 
@@ -146,6 +156,7 @@ void setup() {
   //subscribe to settings
   mqtt.subscribe(&sethightemp);
   mqtt.subscribe(&setlowtemp);
+  mqtt.subscribe(&lowTempPercentageSub);
 
   if (! aht.begin()) {
     Serial.println("Could not find AHT? Check wiring");
@@ -154,7 +165,8 @@ void setup() {
     printRow(1, "Do Something");
     delay(10000);
   }
-
+ 
+  
   pinMode(RELAYPIN, OUTPUT);     //Set relay pin as output
   // set up the LCD's number of columns and rows:
   lcd.begin(16, 2);
@@ -169,6 +181,7 @@ void setup() {
   //give dht11 a few seconds to get its bearings and poll it, get a full reading, and send
 
   if (updateFromAdafruit) {
+    //    timer.in(5000, getLowTempPercentage);
     timer.in(7500, triggerGetFromAdafruit);
     timer.in(9000, pullFromAdafruit);
   }
@@ -214,8 +227,9 @@ void loop() {
   timer.tick();
 }
 
-
+//############ Reboot Function  ##############
 bool rebootFunc( void *) {
+  Serial.println(F("%%%%%%%%%% about to reboot %%%%%%%%%%%%%%%%"));
   printRow(1, "Going to Reboot");
   delay(2000);
   //bring reset pin low to trigger reset
@@ -223,6 +237,7 @@ bool rebootFunc( void *) {
   return false; //this will never run (unless wires are disconnected
 }
 
+//############ Trigger Get from Adafruit  ##############
 bool triggerGetFromAdafruit(void *) {
   Serial.println("triggering a get to adafruit hightemp and lowtemp");
   MQTT_connect();
@@ -244,40 +259,61 @@ bool triggerGetFromAdafruit(void *) {
   } else {
     Serial.println(F("OK!"));
   }
+
+  Serial.print("Sending to low percentage get ... ");
+  if (! lowTempPercentageGet.publish(0.0)) {
+    Serial.println(F("Failed"));
+  } else {
+    Serial.println(F("OK!"));
+  }
+
 }
 
+//############ Pull from Adafruit  ##############
 bool pullFromAdafruit(void *) {
   Serial.println("going to update FROM adafruit");
   MQTT_connect();
   // this is our 'wait for incoming subscription packets' busy subloop
   Adafruit_MQTT_Subscribe *subscription;
-  while ((subscription = mqtt.readSubscription(3000))) {
+  while ((subscription = mqtt.readSubscription(5000))) {
+
+    if (subscription == &lowTempPercentageSub) {
+      lowTempCyclePercentUp =  atoi((char *)lowTempPercentageSub.lastread);
+      cycleUpTime = (lowTempCycleDuration * lowTempCyclePercentUp) / 100;
+      cycleDownTime = lowTempCycleDuration - cycleUpTime;
+      Serial.print(F("New low temp cycle, cycle up Percent:"));
+      Serial.println(lowTempCyclePercentUp);
+      delay(1000);
+    }
+
     // Check high temp first
     if (subscription == &sethightemp) {
-      Serial.print("%%%%%%%%%%%%%%%%%%%%%%%%% high temp pulled from subscription : ");
+      Serial.print("high temp pulled from subscription : ");
       Serial.print((char *)sethightemp.lastread);
       Serial.print("   SET high temp ");
-      highSetTemp =  atoi((char *)sethightemp.lastread); 
+      highSetTemp =  atoi((char *)sethightemp.lastread);
       Serial.println(highSetTemp);
       printRowInt(1, "hi temp: ", highSetTemp);
-      delay(2000);
+      delay(1000);
     }
 
     // check low temp now
     if (subscription == &setlowtemp) {
-      Serial.print("%%%%%%%%%%%%%%%%%%%%%%% got LOW temp pulled from subscription: ");
+      Serial.print("got LOW temp pulled from subscription: ");
       Serial.print((char *)setlowtemp.lastread);
       Serial.print("   SET low temp ");
-      lowSetTemp = atoi((char *)setlowtemp.lastread); 
+      lowSetTemp = atoi((char *)setlowtemp.lastread);
       Serial.println(lowSetTemp);
       printRowInt(1, "lo temp: ",  lowSetTemp);
-      delay(2000);
+      delay(1000);
     }
+
+
   }
   return true;
 }
 
-
+//############ Update TO Adafruit ##############
 bool updateAdafruit(void *) {
   Serial.println("updating Adafruit");
 
@@ -315,7 +351,7 @@ bool updateAdafruit(void *) {
     Serial.println(F("OK!"));
   }
 
-//thermostatStatusPub
+  //thermostatStatusPub
   // Now we can publish stuff!
   Serial.print("Sending current thermostat status val ... ");
   uint32_t unsignedStatus = currentStatus;
@@ -325,11 +361,9 @@ bool updateAdafruit(void *) {
     Serial.println(F("OK!"));
   }
 
-
-
-
 }
 
+//############ Update TO Blynk  ##############
 bool updateBlynk(void *) {
   if (!updateToBlynk) {
     Serial.println("not updating blynk");
@@ -356,6 +390,8 @@ bool updateBlynk(void *) {
   return true; //repeat? true
 }
 
+
+//############ Check temperature thresholds  ##############
 void checkThresholds() {
 
   //get current relay state
@@ -366,7 +402,7 @@ void checkThresholds() {
     if (currentStatus != statusHigh) {
       //under lowSetTemp but not full on
       currentStatus = statusHigh;
-      incrementIntermittentSettings(1);//bring pecentage up of how much is runs up when intermittnet
+      incrementIntermittentSettings(true);//bring pecentage up of how much is runs up when intermittnet
     }
     digitalWrite(RELAYPIN, HIGH); //turn on relay
 
@@ -374,13 +410,32 @@ void checkThresholds() {
     if (currentStatus != statusOff) {
       //over highSetTemp but not full off
       currentStatus = statusOff;
-      incrementIntermittentSettings(-1);//bring pecentage down of how much is runs up when intermittnet
+      incrementIntermittentSettings(false);//bring pecentage down of how much is runs up when intermittnet
     }
     digitalWrite(RELAYPIN, LOW); //turn off relay
 
   } else {
     //we are between high and low
-    if (currentStatus != statusLow) {
+
+    //let's check if we are first starting
+    if (currentStatus == statusInitializing) {
+      currentStatus = statusLow;
+      //when first starting and in low temp setting, have chance of being int-on or int-off
+      if (random(1, 3) > 1) {
+        //turn on
+        printRow(1, "#setting int ON");
+        digitalWrite(RELAYPIN, HIGH); //turn on relay
+        cycleLastChange = millis();
+        delay(2000);
+      } else {
+        //turn off
+        printRow(1, "#setting int OFF");
+        digitalWrite(RELAYPIN, LOW); //turn off relay
+        cycleLastChange = millis();
+        delay(2000);
+      }
+
+    } else  if (currentStatus != statusLow) {
       //we just jumped into intermittent cycling
       //leave relay as it was
       currentStatus = statusLow;
@@ -391,9 +446,9 @@ void checkThresholds() {
       if (relayState == 1) {
         if ((millis() - cycleLastChange) > cycleUpTime) {
           printRow(1, "#setting int OFF");
-          delay(2000);
           digitalWrite(RELAYPIN, LOW); //turn off relay
           cycleLastChange = millis();
+          delay(2000);
         } else {
           digitalWrite(RELAYPIN, HIGH);
         }
@@ -402,9 +457,9 @@ void checkThresholds() {
         //relayState == 0  or weirdness
         if ((millis() - cycleLastChange) > cycleDownTime) {
           printRow(1, "#setting int ON");
-          delay(2000);
           digitalWrite(RELAYPIN, HIGH); //turn on relay
           cycleLastChange = millis();
+          delay(2000);
         } else {
           digitalWrite(RELAYPIN, LOW);
         }
@@ -414,6 +469,7 @@ void checkThresholds() {
   }//end of if/else for temps
 }
 
+//############ Update status on LCD  ##############
 void updateLCDstatus() {
   printRow(1, "Updating LCD");
   lcd.setCursor(0, 0);
@@ -444,11 +500,12 @@ void updateLCDstatus() {
   }
   lcd.print(currentState );
 
+  printRowInt(1, "low temp % up:", lowTempCyclePercentUp );
 }
 
+//############ Read the Temperature  ##############
 bool readTemp(void *) {
   Serial.println("reading temp");
-
 
   float tempC;
   float currentTempF;
@@ -468,7 +525,7 @@ bool readTemp(void *) {
     //check if read temp is anomalous temperature reading
     //anomalous being defined as the temp being (25 * (tempAnomalyCount + 1))% off of the previous reading
     float tempDiffPercent = (abs(currentTempF - tempF)) / tempF;
-    //if it's not the first rading, and it's anomalous, we will ignore it. 
+    //if it's not the first rading, and it's anomalous, we will ignore it.
     //each subsequent anomalous reading adds 10% to allowed range of non-anomalous readings
     if (tempF != -1.0 && tempDiffPercent > ((tempAnomalyCount + 1) * .1)) {
       printRow(1, "Anomalous Temp");
@@ -485,12 +542,10 @@ bool readTemp(void *) {
       Serial.println("########################");
       tempAnomalyCount += 1;
 
-
       return true;
     } else {
       tempAnomalyCount = 0;
     }
-
 
     temps[tempsArrayIndicator] = currentTempF;
     humidities[tempsArrayIndicator++] = humidity.relative_humidity;
@@ -503,9 +558,6 @@ bool readTemp(void *) {
   } else {
     printRow(1, "Sensor Error");
   }
-
-
-
 
   Serial.print("array indicator: ");
   Serial.println(tempsArrayIndicator, DEC);
@@ -521,10 +573,7 @@ bool readTemp(void *) {
   }
   lcd.print(String(currentTempF, 2));
 
-
   Serial.println("temp: " + String(currentTempF, 2));
-
-
 
   //let's see if we have tempsToRound temps to average
   if (tempsArrayIndicator >= tempsToRound) {
@@ -547,14 +596,33 @@ bool readTemp(void *) {
   return true;
 }
 
-void incrementIntermittentSettings(int increaseUp) {
+//############ Increment the percentage on the low heat setting  ##############
+void incrementIntermittentSettings(bool increaseUp) {
 
-  lowTempCyclePercentUp += increaseUp;
+  if (increaseUp) {
+    lowTempCyclePercentUp += lowTempPercentageChange;
+  } else {
+    lowTempCyclePercentUp -= lowTempPercentageChange;
+  }
+
   cycleUpTime = (lowTempCycleDuration * lowTempCyclePercentUp) / 100;
   cycleDownTime = lowTempCycleDuration - cycleUpTime;
+
+  //lowTempPercentageSub
+  // Now we can publish stuff!
+  Serial.print(F("Sending lowTempPercentageSub to adafruit val "));
+  Serial.print(lowTempCyclePercentUp);
+  uint32_t unsignedLowTempPercentage = lowTempCyclePercentUp;
+  if (! lowTempPercentagePub.publish(unsignedLowTempPercentage)) {
+    Serial.println(F("Failed"));
+  } else {
+    Serial.println(F("OK!"));
+  }
+
+
 }
 
-
+//############ Round a float to 2 digits  ##############
 float roundFloat(float x) {
   x = x + 0.005;
   x = x * 100;
@@ -563,6 +631,7 @@ float roundFloat(float x) {
   return z;
 }
 
+//############ Printrow  ##############
 void printRow(int rowNum, char toPrint[]) {
   lcd.setCursor(0, rowNum);
   lcd.print("                   ");
@@ -570,16 +639,17 @@ void printRow(int rowNum, char toPrint[]) {
   lcd.print(toPrint);
 }
 
+//############ Printrow with Integer  ##############
 void printRowInt(int rowNum, char printFirst[], int toPrint) {
   lcd.setCursor(0, rowNum);
   lcd.print("                   ");
   lcd.setCursor(0, rowNum);
   lcd.print(printFirst);
-  lcd.print(toPrint,DEC);
+  lcd.print(toPrint, DEC);
 }
 
-// Function to connect and reconnect as necessary to the MQTT server.
-// Should be called in the loop function and it will take care if connecting.
+
+//############ MQTT_connect  ##############
 void MQTT_connect() {
   int8_t ret;
 
