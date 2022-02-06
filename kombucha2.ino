@@ -34,6 +34,18 @@
 */
 
 
+
+#define DEBUG 0
+
+# if DEBUG == 1
+#define debugSerial(x) debugSerial(x)
+#define debugSerialln(x) debugSerialln(x)
+#else
+#define debugSerial(x)
+#define debugSerialln(x)
+#endif
+
+
 #include <dht11.h>
 #include <Adafruit_AHTX0.h>
 const int sensorIndicator = 2; // 1 = DHT11, 2=AHT20
@@ -159,7 +171,7 @@ void setup() {
   mqtt.subscribe(&lowTempPercentageSub);
 
   if (! aht.begin()) {
-    Serial.println("Could not find AHT? Check wiring");
+    debugSerialln("Could not find AHT? Check wiring");
     printRow(1, "AHT20 not found");
     delay(10000);
     printRow(1, "Do Something");
@@ -175,9 +187,9 @@ void setup() {
   //some setup of variables
   cycleUpTime = (lowTempCycleDuration * lowTempCyclePercentUp) / 100;
   cycleDownTime = lowTempCycleDuration - cycleUpTime;
-  Serial.println("##############");
-  Serial.println("doing setup");
-  Serial.println("##############");
+  debugSerialln("##############");
+  debugSerialln("doing setup");
+  debugSerialln("##############");
   //give dht11 a few seconds to get its bearings and poll it, get a full reading, and send
 
   if (updateFromAdafruit) {
@@ -229,7 +241,7 @@ void loop() {
 
 //############ Reboot Function  ##############
 bool rebootFunc( void *) {
-  Serial.println(F("%%%%%%%%%% about to reboot %%%%%%%%%%%%%%%%"));
+  debugSerialln(F("%%%%%%%%%% about to reboot %%%%%%%%%%%%%%%%"));
   printRow(1, "Going to Reboot");
   delay(2000);
   //bring reset pin low to trigger reset
@@ -239,39 +251,39 @@ bool rebootFunc( void *) {
 
 //############ Trigger Get from Adafruit  ##############
 bool triggerGetFromAdafruit(void *) {
-  Serial.println("triggering a get to adafruit hightemp and lowtemp");
+  debugSerialln("triggering a get to adafruit hightemp and lowtemp");
   MQTT_connect();
 
 
   //let's do low temp first
   //first we need to publish to the /get feed
-  Serial.print("Sending to low temp get ... ");
+  debugSerial("Sending to low temp get ... ");
   if (! setlowtempGet.publish(0.0)) {
-    Serial.println(F("Failed"));
+    debugSerialln(F("Failed"));
   } else {
-    Serial.println(F("OK!"));
+    debugSerialln(F("OK!"));
   }
 
   //now let's do the high temp
-  Serial.print("Sending to high temp get ... ");
+  debugSerial("Sending to high temp get ... ");
   if (! sethightempGet.publish(0.0)) {
-    Serial.println(F("Failed"));
+    debugSerialln(F("Failed"));
   } else {
-    Serial.println(F("OK!"));
+    debugSerialln(F("OK!"));
   }
 
-  Serial.print("Sending to low percentage get ... ");
+  debugSerial("Sending to low percentage get ... ");
   if (! lowTempPercentageGet.publish(0.0)) {
-    Serial.println(F("Failed"));
+    debugSerialln(F("Failed"));
   } else {
-    Serial.println(F("OK!"));
+    debugSerialln(F("OK!"));
   }
 
 }
 
 //############ Pull from Adafruit  ##############
 bool pullFromAdafruit(void *) {
-  Serial.println("going to update FROM adafruit");
+  debugSerialln("going to update FROM adafruit");
   MQTT_connect();
   // this is our 'wait for incoming subscription packets' busy subloop
   Adafruit_MQTT_Subscribe *subscription;
@@ -281,29 +293,29 @@ bool pullFromAdafruit(void *) {
       lowTempCyclePercentUp =  atoi((char *)lowTempPercentageSub.lastread);
       cycleUpTime = (lowTempCycleDuration * lowTempCyclePercentUp) / 100;
       cycleDownTime = lowTempCycleDuration - cycleUpTime;
-      Serial.print(F("New low temp cycle, cycle up Percent:"));
-      Serial.println(lowTempCyclePercentUp);
+      debugSerial(F("New low temp cycle, cycle up Percent:"));
+      debugSerialln(lowTempCyclePercentUp);
       delay(1000);
     }
 
     // Check high temp first
     if (subscription == &sethightemp) {
-      Serial.print("high temp pulled from subscription : ");
-      Serial.print((char *)sethightemp.lastread);
-      Serial.print("   SET high temp ");
+      debugSerial("high temp pulled from subscription : ");
+      debugSerial((char *)sethightemp.lastread);
+      debugSerial("   SET high temp ");
       highSetTemp =  atoi((char *)sethightemp.lastread);
-      Serial.println(highSetTemp);
+      debugSerialln(highSetTemp);
       printRowInt(1, "hi temp: ", highSetTemp);
       delay(1000);
     }
 
     // check low temp now
     if (subscription == &setlowtemp) {
-      Serial.print("got LOW temp pulled from subscription: ");
-      Serial.print((char *)setlowtemp.lastread);
-      Serial.print("   SET low temp ");
+      debugSerial("got LOW temp pulled from subscription: ");
+      debugSerial((char *)setlowtemp.lastread);
+      debugSerial("   SET low temp ");
       lowSetTemp = atoi((char *)setlowtemp.lastread);
-      Serial.println(lowSetTemp);
+      debugSerialln(lowSetTemp);
       printRowInt(1, "lo temp: ",  lowSetTemp);
       delay(1000);
     }
@@ -315,50 +327,50 @@ bool pullFromAdafruit(void *) {
 
 //############ Update TO Adafruit ##############
 bool updateAdafruit(void *) {
-  Serial.println("updating Adafruit");
+  debugSerialln("updating Adafruit");
 
   printRow(1, "Updating Adafruit");
   MQTT_connect();
 
-  Serial.println("going to update TO adafruit");
+  debugSerialln("going to update TO adafruit");
   uint32_t unsignedRelayState = digitalRead(RELAYPIN);
 
   // Now we can publish stuff!
-  Serial.print("Sending temp to adafruit val ");
-  Serial.print(tempF);
-  Serial.print("...");
+  debugSerial("Sending temp to adafruit val ");
+  debugSerial(tempF);
+  ("...");
   if (! tempPub.publish(tempF)) {
-    Serial.println(F("Failed"));
+    debugSerialln(F("Failed"));
   } else {
-    Serial.println(F("OK!"));
+    debugSerialln(F("OK!"));
   }
 
   // Now we can publish stuff!
-  Serial.print("Sending humidity val ");
-  Serial.print(humidity);
-  Serial.print("...");
+  debugSerial("Sending humidity val ");
+  debugSerial(humidity);
+  debugSerial("...");
   if (! humidityPub.publish(humidity)) {
-    Serial.println(F("Failed"));
+    debugSerialln(F("Failed"));
   } else {
-    Serial.println(F("OK!"));
+    debugSerialln(F("OK!"));
   }
 
   // Now we can publish stuff!
-  Serial.print("Sending relay state val ... ");
+  debugSerial("Sending relay state val ... ");
   if (! lightPub.publish(unsignedRelayState)) {
-    Serial.println(F("Failed"));
+    debugSerialln(F("Failed"));
   } else {
-    Serial.println(F("OK!"));
+    debugSerialln(F("OK!"));
   }
 
   //thermostatStatusPub
   // Now we can publish stuff!
-  Serial.print("Sending current thermostat status val ... ");
+  debugSerial("Sending current thermostat status val ... ");
   uint32_t unsignedStatus = currentStatus;
   if (! thermostatStatusPub.publish(unsignedStatus)) {
-    Serial.println(F("Failed"));
+    debugSerialln(F("Failed"));
   } else {
-    Serial.println(F("OK!"));
+    debugSerialln(F("OK!"));
   }
 
 }
@@ -366,7 +378,7 @@ bool updateAdafruit(void *) {
 //############ Update TO Blynk  ##############
 bool updateBlynk(void *) {
   if (!updateToBlynk) {
-    Serial.println("not updating blynk");
+    debugSerialln("not updating blynk");
     return false;
   }
   printRow(1, "Updating Blynk");
@@ -374,14 +386,14 @@ bool updateBlynk(void *) {
     Blynk.run();
   } else {
     Blynk.connect();  // Try to reconnect to the server
-    Serial.println("###had to reconnect to Blynk");
+    debugSerialln("###had to reconnect to Blynk");
   }
-  Serial.println("Updating Blynk");
+  debugSerialln("Updating Blynk");
   Blynk.virtualWrite(V5, tempF);
   //uptime minutes
   int uptimeMinutes = (millis() - startMillis) / 60000;
-  Serial.print("uptimeMinutes: ");
-  Serial.println(uptimeMinutes);
+  debugSerial("uptimeMinutes: ");
+  debugSerialln(uptimeMinutes);
   Blynk.virtualWrite(V2, uptimeMinutes);
   Blynk.virtualWrite(V7, humidity);
   relayState = digitalRead(RELAYPIN);
@@ -505,7 +517,7 @@ void updateLCDstatus() {
 
 //############ Read the Temperature  ##############
 bool readTemp(void *) {
-  Serial.println("reading temp");
+  debugSerialln("reading temp");
 
   float tempC;
   float currentTempF;
@@ -529,17 +541,17 @@ bool readTemp(void *) {
     //each subsequent anomalous reading adds 10% to allowed range of non-anomalous readings
     if (tempF != -1.0 && tempDiffPercent > ((tempAnomalyCount + 1) * .1)) {
       printRow(1, "Anomalous Temp");
-      Serial.println("########################");
-      Serial.println("we got an anomalous reading");
-      Serial.print("last temp reading : ");
-      Serial.print(tempF);
-      Serial.print("   currentTempReading in F :");
-      Serial.print(currentTempF);
-      Serial.print("   current reading in C :");
-      Serial.print(tempC);
-      Serial.print("   anomaly count: ");
-      Serial.println(tempAnomalyCount);
-      Serial.println("########################");
+      debugSerialln("########################");
+      debugSerialln("we got an anomalous reading");
+      debugSerial("last temp reading : ");
+      debugSerial(tempF);
+      debugSerial("   currentTempReading in F :");
+      debugSerial(currentTempF);
+      debugSerial("   current reading in C :");
+      debugSerial(tempC);
+      debugSerial("   anomaly count: ");
+      debugSerialln(tempAnomalyCount);
+      debugSerialln("########################");
       tempAnomalyCount += 1;
 
       return true;
@@ -549,18 +561,18 @@ bool readTemp(void *) {
 
     temps[tempsArrayIndicator] = currentTempF;
     humidities[tempsArrayIndicator++] = humidity.relative_humidity;
-    Serial.print("AHT20 Temperature: ");
-    Serial.print(temp.temperature);
-    Serial.print(" degrees C   "    );
-    Serial.print("Humidity: ");
-    Serial.print(humidity.relative_humidity);
-    Serial.println("% rH");
+    debugSerial("AHT20 Temperature: ");
+    debugSerial(temp.temperature);
+    debugSerial(" degrees C   "    );
+    debugSerial("Humidity: ");
+    debugSerial(humidity.relative_humidity);
+    debugSerialln("% rH");
   } else {
     printRow(1, "Sensor Error");
   }
 
-  Serial.print("array indicator: ");
-  Serial.println(tempsArrayIndicator, DEC);
+  debugSerial("array indicator: ");
+  debugSerialln(tempsArrayIndicator);
   //put temp on lcd without strings
   lcd.setCursor(0, 1);
   lcd.print("                   ");
@@ -573,7 +585,7 @@ bool readTemp(void *) {
   }
   lcd.print(String(currentTempF, 2));
 
-  Serial.println("temp: " + String(currentTempF, 2));
+  debugSerialln("temp: " + String(currentTempF, 2));
 
   //let's see if we have tempsToRound temps to average
   if (tempsArrayIndicator >= tempsToRound) {
@@ -585,10 +597,10 @@ bool readTemp(void *) {
     }
     float roundedTemp = roundFloat(tempTotal / tempsToRound);
     tempF = roundedTemp;
-    Serial.println("new Temp: " + String(tempF, 2));
+    debugSerialln("new Temp: " + String(tempF, 2));
     float roundedHumidity = roundFloat(humidityTotal / tempsToRound);
     humidity = roundedHumidity;
-    Serial.println("new Humdidity: " + String(humidity, 1));
+    debugSerialln("new Humdidity: " + String(humidity, 1));
     checkThresholds();//see if we need to change relay states
     updateLCDstatus();
     tempsArrayIndicator = 0;
@@ -610,13 +622,13 @@ void incrementIntermittentSettings(bool increaseUp) {
 
   //lowTempPercentageSub
   // Now we can publish stuff!
-  Serial.print(F("Sending lowTempPercentageSub to adafruit val "));
-  Serial.print(lowTempCyclePercentUp);
+  debugSerial(F("Sending lowTempPercentageSub to adafruit val "));
+  debugSerial(lowTempCyclePercentUp);
   uint32_t unsignedLowTempPercentage = lowTempCyclePercentUp;
   if (! lowTempPercentagePub.publish(unsignedLowTempPercentage)) {
-    Serial.println(F("Failed"));
+    debugSerialln(F("Failed"));
   } else {
-    Serial.println(F("OK!"));
+    debugSerialln(F("OK!"));
   }
 
 
@@ -658,12 +670,12 @@ void MQTT_connect() {
     return;
   }
 
-  Serial.print("Connecting to MQTT... ");
+  debugSerial("Connecting to MQTT... ");
 
   uint8_t retries = 3;
   while ((ret = mqtt.connect()) != 0) { // connect will return 0 for connected
-    Serial.println(mqtt.connectErrorString(ret));
-    Serial.println("Retrying MQTT connection in 5 seconds...");
+    debugSerialln(mqtt.connectErrorString(ret));
+    debugSerialln("Retrying MQTT connection in 5 seconds...");
     mqtt.disconnect();
     delay(5000);  // wait 5 seconds
     retries--;
@@ -672,5 +684,5 @@ void MQTT_connect() {
       while (1);
     }
   }
-  Serial.println("MQTT Connected!");
+  debugSerialln("MQTT Connected!");
 }
