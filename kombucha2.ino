@@ -14,7 +14,7 @@
 #include "Adafruit_MQTT.h"
 #include "Adafruit_MQTT_Client.h"
 
-#define DEBUG 0
+#define DEBUG 1
 
 #if DEBUG == 1
 #define debugSerial(x) Serial.print(x)
@@ -150,8 +150,14 @@ void setup() {
   Serial.begin(9600);
   // This delay gives the chance to wait for a Serial Monitor without blocking if none is found
   delay(1500);
-    Blynk.begin(auth, ssid, pass);
-    
+  Blynk.begin(auth, ssid, pass);
+
+
+  //subscribe to settings
+  mqtt.subscribe(&sethightemp);
+  mqtt.subscribe(&setlowtemp);
+  mqtt.subscribe(&lowTempPercentageSub);
+
   //calculate how long heat stays on for low heat setting. hopefully re-done if connected to IOT
   cycleUpTime = (lowTempCycleDuration * lowTempIntensity) / 100;
   cycleDownTime = lowTempCycleDuration - cycleUpTime;
@@ -188,6 +194,7 @@ void setup() {
   }
   if (updateFromAdafruit) {
     delay(2000);
+    //timer.in(2000, triggerGetFromAdafruit); //trigger a pull in 2 secs
     timer.every(AdafruitTriggerPullTimerRepeat, triggerGetFromAdafruit);
     delay(2000);
     timer.every(AdafruitPullTimerRepeat , pullFromAdafruit);
@@ -254,6 +261,8 @@ bool pullFromAdafruit(void *) {
       debugSerial(F("New low temp cycle, cycle up Percent:"));
       debugSerialln(lowTempCyclePercentUp);
       delay(1000);
+    } else {
+      debugSerial(F("---no low temp percentage update---"));
     }
 
     // Check high temp first
@@ -265,6 +274,8 @@ bool pullFromAdafruit(void *) {
       debugSerialln(highSetTemp);
       printRowInt( "hi temp: ", highSetTemp);
       delay(1000);
+    } else {
+      debugSerial(F("---no high temp update---"));
     }
 
     // check low temp now
@@ -276,6 +287,8 @@ bool pullFromAdafruit(void *) {
       debugSerialln(lowSetTemp);
       printRowInt( "lo temp: ",  lowSetTemp);
       delay(1000);
+    } else {
+      debugSerial(F("---no low temp update---"));
     }
 
 
