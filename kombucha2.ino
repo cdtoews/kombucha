@@ -14,7 +14,7 @@
 #include "Adafruit_MQTT.h"
 #include "Adafruit_MQTT_Client.h"
 
-#define DEBUG 1
+#define DEBUG 0
 
 #if DEBUG == 1
 #define debugSerial(x) Serial.print(x)
@@ -34,9 +34,9 @@ bool doorOpen;
 float currentTempF;
 int currentStatus;
 int highTemp;
-int intensityIncrementAmount;
+int intensityIncrementAmount = 1;
 int lowTemp;
-int lowTempIntensity;
+
 int relayState;
 
 //for AHT20 temp sensor
@@ -158,8 +158,12 @@ void setup() {
   mqtt.subscribe(&setlowtemp);
   mqtt.subscribe(&lowTempPercentageSub);
 
+  debugSerialln("getting low temp setting from adafruit");
+  pullLowTempSetting();
+  delay(500);
+  
   //calculate how long heat stays on for low heat setting. hopefully re-done if connected to IOT
-  cycleUpTime = (lowTempCycleDuration * lowTempIntensity) / 100;
+  cycleUpTime = (lowTempCycleDuration * lowTempCyclePercentUp) / 100;
   cycleDownTime = lowTempCycleDuration - cycleUpTime;
   currentStatus = statusInitializing; //what the status is
 
@@ -194,7 +198,8 @@ void setup() {
   }
   if (updateFromAdafruit) {
     delay(2000);
-    //timer.in(2000, triggerGetFromAdafruit); //trigger a pull in 2 secs
+    timer.in(2000, triggerGetFromAdafruit); //trigger a pull in 2 secs
+    timer.in(12000, pullFromAdafruit); //do the pull 10 seconds after triggering get
     timer.every(AdafruitTriggerPullTimerRepeat, triggerGetFromAdafruit);
     delay(2000);
     timer.every(AdafruitPullTimerRepeat , pullFromAdafruit);
@@ -237,14 +242,16 @@ bool triggerGetFromAdafruit(void *) {
     debugSerialln(F("OK!"));
   }
 
-  debugSerial("Sending to low percentage get ... ");
-  if (! lowTempPercentageGet.publish(0.0)) {
-    debugSerialln(F("Failed"));
-  } else {
-    debugSerialln(F("OK!"));
-  }
+  //moving this to only grab at startup
+  //  debugSerial("Sending to low percentage get ... ");
+  //  if (! lowTempPercentageGet.publish(0.0)) {
+  //    debugSerialln(F("Failed"));
+  //  } else {
+  //    debugSerialln(F("OK!"));
+  //  }
 
 }
+
 
 //############ Pull from Adafruit  ##############
 bool pullFromAdafruit(void *) {
@@ -254,41 +261,41 @@ bool pullFromAdafruit(void *) {
   Adafruit_MQTT_Subscribe *subscription;
   while ((subscription = mqtt.readSubscription(5000))) {
 
-    if (subscription == &lowTempPercentageSub) {
-      lowTempCyclePercentUp =  atoi((char *)lowTempPercentageSub.lastread);
-      cycleUpTime = (lowTempCycleDuration * lowTempCyclePercentUp) / 100;
-      cycleDownTime = lowTempCycleDuration - cycleUpTime;
-      debugSerial(F("New low temp cycle, cycle up Percent:"));
-      debugSerialln(lowTempCyclePercentUp);
-      delay(1000);
-    } else {
-      debugSerial(F("---no low temp percentage update---"));
-    }
+//    if (subscription == &lowTempPercentageSub) {
+//      lowTempCyclePercentUp =  atoi((char *)lowTempPercentageSub.lastread);
+//      cycleUpTime = (lowTempCycleDuration * lowTempCyclePercentUp) / 100;
+//      cycleDownTime = lowTempCycleDuration - cycleUpTime;
+//      debugSerial(F("New low temp cycle, cycle up Percent:"));
+//      debugSerialln(lowTempCyclePercentUp);
+//      delay(1000);
+//    } else {
+//      debugSerialln(F("---no low temp percentage update---"));
+//    }
 
     // Check high temp first
     if (subscription == &sethightemp) {
-      debugSerial("high temp pulled from subscription : ");
-      debugSerial((char *)sethightemp.lastread);
-      debugSerial("   SET high temp ");
+      debugSerialln("high temp pulled from subscription : ");
+      debugSerialln((char *)sethightemp.lastread);
+      debugSerialln("   SET high temp ");
       highSetTemp =  atoi((char *)sethightemp.lastread);
       debugSerialln(highSetTemp);
       printRowInt( "hi temp: ", highSetTemp);
       delay(1000);
     } else {
-      debugSerial(F("---no high temp update---"));
+      debugSerialln(F("---no high temp update---"));
     }
 
     // check low temp now
     if (subscription == &setlowtemp) {
-      debugSerial("got LOW temp pulled from subscription: ");
-      debugSerial((char *)setlowtemp.lastread);
-      debugSerial("   SET low temp ");
+      debugSerialln("got LOW temp pulled from subscription: ");
+      debugSerialln((char *)setlowtemp.lastread);
+      debugSerialln("   SET low temp ");
       lowSetTemp = atoi((char *)setlowtemp.lastread);
       debugSerialln(lowSetTemp);
       printRowInt( "lo temp: ",  lowSetTemp);
       delay(1000);
     } else {
-      debugSerial(F("---no low temp update---"));
+      debugSerialln(F("---no low temp update---"));
     }
 
 
@@ -301,7 +308,7 @@ bool pullFromAdafruit(void *) {
 bool updateAdafruit(void *) {
   debugSerialln("updating Adafruit");
 
-  printRow( "Updating Adafruit");
+  printRow(F("Updating Adafruit"));
   MQTT_connect();
 
   debugSerialln("going to update TO adafruit");
@@ -322,7 +329,7 @@ bool updateAdafruit(void *) {
   // Now we can publish stuff!
   debugSerial("Sending humidity val ");
   debugSerial(humidity);
-  debugSerial("...");
+  debugSerialln("...");
   if (! humidityPub.publish(humidity)) {
     debugSerialln(F("Failed"));
   } else {
@@ -348,6 +355,19 @@ bool updateAdafruit(void *) {
   } else {
     debugSerialln(F("OK!"));
   }
+
+
+    //update lowtempsettings
+    // Now we can publish stuff!
+    debugSerial("Sending intermittent val ... ");
+    uint32_t unsignedPercentage = lowTempCyclePercentUp;
+    if (! lowTempPercentagePub.publish(unsignedPercentage)) {
+      debugSerialln(F("Failed"));
+    } else {
+      debugSerialln(F("OK!"));
+    }
+
+
   printRow( "Updated Adafruit");
 }
 
@@ -582,20 +602,70 @@ bool readTemp(void *) {
 
 //############ Increment the percentage on the low heat setting  ##############
 void incrementIntermittentSettings(int increaseAmount) {
-  lowTempIntensity += increaseAmount;
+  lowTempCyclePercentUp += increaseAmount;
 
   //keep this between 0 and 100
-  if (lowTempIntensity > 100) {
-    lowTempIntensity = 100;
+  if (lowTempCyclePercentUp > 100) {
+    lowTempCyclePercentUp = 100;
   }
 
-  if (lowTempIntensity < 0) {
-    lowTempIntensity = 0;
+  if (lowTempCyclePercentUp < 0) {
+    lowTempCyclePercentUp = 0;
   }
 
-  cycleUpTime = (lowTempCycleDuration * lowTempIntensity) / 100;
+  cycleUpTime = (lowTempCycleDuration * lowTempCyclePercentUp) / 100;
   cycleDownTime = lowTempCycleDuration - cycleUpTime;
+  debugSerial("--New Low Temp Intesity Setting: ");
+  debugSerialln(lowTempCyclePercentUp);
+  updateIntermittentSetting();//publish the change
 }
+
+//############ update through MQTT the low temp percentage  ##############
+void updateIntermittentSetting() {
+  MQTT_connect();
+
+  // Now we can publish stuff!
+  debugSerial("Sending intermittent val ... ");
+  uint32_t unsignedPercentage = lowTempCyclePercentUp;
+  if (! lowTempPercentagePub.publish(unsignedPercentage)) {
+    debugSerialln(F("Failed"));
+  } else {
+    debugSerialln(F("OK!"));
+  }
+}
+
+//############ Pull MQTT the low temp percentage  ##############
+void pullLowTempSetting() {
+  MQTT_connect();
+
+  //trigger a pull of low temp setttings
+  debugSerial("Sending to low percentage get ... ");
+  if (! lowTempPercentageGet.publish(0.0)) {
+    debugSerialln(F("Failed"));
+  } else {
+    debugSerialln(F("OK!"));
+  }
+
+  Adafruit_MQTT_Subscribe *subscription;
+  while ((subscription = mqtt.readSubscription(5000))) {
+
+    if (subscription == &lowTempPercentageSub) {
+      lowTempCyclePercentUp =  atoi((char *)lowTempPercentageSub.lastread);
+      //incrementIntermittentSettings(0);//update timing setttings
+      cycleUpTime = (lowTempCycleDuration * lowTempCyclePercentUp) / 100;
+      cycleDownTime = lowTempCycleDuration - cycleUpTime;
+      debugSerial(F("New low temp cycle, cycle up Percent:"));
+      debugSerialln(lowTempCyclePercentUp);
+      delay(1000);
+    } else {
+      debugSerialln(F("---no low temp percentage update---"));
+    }
+
+  }
+
+}
+
+
 
 //############ Round a float to 2 digits  ##############
 float roundFloat(float x) {
@@ -606,57 +676,6 @@ float roundFloat(float x) {
   return z;
 }
 
-//##############################################
-//############ Arduino Functions  ##############
-//##############################################
-
-/*
-  Since HighTemp is READ_WRITE variable, onHighTempChange() is
-  executed every time a new value is received from IoT Cloud.
-  //these are currently not working, need to port to adafruit
-*/
-void onHighTempChange()  {
-  highSetTemp = highTemp;
-  debugSerial("new High Temp:");
-  debugSerialln(highSetTemp);
-  printRowInt(F("high temp:"), highSetTemp);
-  delay(2000);//let it show in screen
-}
-
-/*
-  Since LowTemp is READ_WRITE variable, onLowTempChange() is
-  executed every time a new value is received from IoT Cloud.
-*/
-void onLowTempChange()  {
-  lowSetTemp = lowTemp;
-  debugSerial("new low temp:");
-  debugSerialln(lowSetTemp);
-  printRowInt(F("low temp:"), lowSetTemp);
-  delay(2000);//let it show in screen
-}
-
-/*
-  Since LowTempIntensity is READ_WRITE variable, onLowTempIntensityChange() is
-  executed every time a new value is received from IoT Cloud.
-*/
-void onLowTempIntensityChange()  {
-  incrementIntermittentSettings(0);
-  debugSerial("new low temp percentage:");
-  debugSerialln(lowTempIntensity);
-  printRowInt(F("low %:"), lowTempIntensity);
-  delay(2000);//let it show in screen
-}
-
-/*
-  Since IntensityIncrementAmount is READ_WRITE variable, onIntensityIncrementAmountChange() is
-  executed every time a new value is received from IoT Cloud.
-*/
-void onIntensityIncrementAmountChange()  {
-  debugSerial("new increment amount:");
-  debugSerialln(intensityIncrementAmount);
-  printRowInt(F("low %:"), intensityIncrementAmount);
-  delay(2000);//let it show in screen
-}
 
 //############ MQTT_connect  ##############
 void MQTT_connect() {
